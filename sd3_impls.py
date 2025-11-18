@@ -150,7 +150,16 @@ class BaseModel(torch.nn.Module):
                 dtype=dtype,
             )
 
-    def apply_model(self, x, sigma, c_crossattn=None, y=None, skip_layers=[], controlnet_cond=None):
+    def apply_model(
+        self,
+        x,
+        sigma,
+        c_crossattn=None,
+        y=None,
+        skip_layers=[],
+        controlnet_cond=None,
+        residual=None,
+    ):
         dtype = self.get_dtype()
         timestep = self.model_sampling.timestep(sigma).float()
         controlnet_hidden_states = None
@@ -176,6 +185,7 @@ class BaseModel(torch.nn.Module):
             y=y.to(dtype),
             controlnet_hidden_states=controlnet_hidden_states,
             skip_layers=skip_layers,
+            residual=residual,
         ).float()
         return self.model_sampling.calculate_denoised(sigma, model_output, x)
 
@@ -261,6 +271,7 @@ class SkipLayerCFGDenoiser(torch.nn.Module):
                 c_crossattn=cond["c_crossattn"],
                 y=cond["y"],
                 skip_layers=self.skip_layers,
+                residual=kwargs.get("residual"),
             )
             # Then scale acc to skip layer guidance
             scaled = scaled + (pos_out - skip_layer_out) * self.slg
