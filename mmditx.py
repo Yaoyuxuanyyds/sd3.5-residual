@@ -859,6 +859,7 @@ class MMDiTX(nn.Module):
         context: Optional[torch.Tensor] = None,
         skip_layers: Optional[List] = [],
         controlnet_hidden_states: Optional[torch.Tensor] = None,
+        residual: Optional[Dict] = None,
     ) -> torch.Tensor:
         if self.register_length > 0:
             context = torch.cat(
@@ -871,7 +872,25 @@ class MMDiTX(nn.Module):
 
         # context is B, L', D
         # x is B, L, D
+        residual_source = None
+        residual_targets = {}
+        residual_origin = None
+        if residual is not None:
+            residual_origin = residual.get("origin_layer", 0)
+            targets = residual.get("target_layers", []) or []
+            weights = residual.get("weights", []) or []
+            residual_targets = {t: w for t, w in zip(targets, weights)}
+
         for i, block in enumerate(self.joint_blocks):
+            if residual_origin is not None and i == residual_origin:
+                residual_source = context
+            if (
+                residual_source is not None
+                and residual_targets
+                and i in residual_targets
+                and context is not None
+            ):
+                context = context + residual_targets[i] * residual_source
             if i in skip_layers:
                 continue
             context, x = block(context, x, c=c_mod)
@@ -892,6 +911,7 @@ class MMDiTX(nn.Module):
         context: Optional[torch.Tensor] = None,
         controlnet_hidden_states: Optional[torch.Tensor] = None,
         skip_layers: Optional[List] = [],
+        residual: Optional[Dict] = None,
     ) -> torch.Tensor:
         """
         Forward pass of DiT.
@@ -908,7 +928,9 @@ class MMDiTX(nn.Module):
 
         context = self.context_embedder(context)
 
-        x = self.forward_core_with_concat(x, c, context, skip_layers, controlnet_hidden_states)
+        x = self.forward_core_with_concat(
+            x, c, context, skip_layers, controlnet_hidden_states, residual
+        )
 
         x = self.unpatchify(x, hw=hw)  # (N, out_channels, H, W)
         return x

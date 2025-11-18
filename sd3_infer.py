@@ -146,6 +146,43 @@ CONTROLNET_MAP = {
 }
 
 
+def _parse_numeric_sequence(value, caster):
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        sequence = list(value)
+    else:
+        value = str(value).strip()
+        if not value:
+            return []
+        sequence = re.split(r"[\s,]+", value)
+    parsed = []
+    for item in sequence:
+        if item is None or item == "":
+            continue
+        parsed.append(caster(item))
+    return parsed
+
+
+def build_residual_config(origin_layer, target_layers, weights):
+    target_layers = _parse_numeric_sequence(target_layers, int) or []
+    if not target_layers:
+        return None
+    weights = _parse_numeric_sequence(weights, float)
+    if weights is None or len(weights) == 0:
+        weights = [1.0] * len(target_layers)
+    if len(target_layers) != len(weights):
+        raise ValueError(
+            "residual_target_layers and residual_weights must have the same length"
+        )
+    origin_layer = int(origin_layer) if origin_layer is not None else 0
+    return {
+        "origin_layer": origin_layer,
+        "target_layers": target_layers,
+        "weights": weights,
+    }
+
+
 class SD3:
     def __init__(
         self, model, shift, control_model_file=None, verbose=False, device="cpu"
@@ -349,6 +386,7 @@ class SD3Inferencer:
         controlnet_cond=None,
         denoise=1.0,
         skip_layer_config={},
+        residual_config=None,
     ) -> torch.Tensor:
         self.print("Sampling...")
         latent = latent.half().cuda()
@@ -363,6 +401,7 @@ class SD3Inferencer:
             "uncond": neg_cond,
             "cond_scale": cfg_scale,
             "controlnet_cond": controlnet_cond,
+            "residual": residual_config,
         }
         noise_scaled = self.sd3.model.model_sampling.noise_scaling(
             sigmas[0], noise, latent, self.max_denoise(sigmas)
@@ -454,6 +493,7 @@ class SD3Inferencer:
         init_image=INIT_IMAGE,
         denoise=DENOISE,
         skip_layer_config={},
+        residual_config=None,
     ):
         controlnet_cond = None
         if init_image:
@@ -491,6 +531,7 @@ class SD3Inferencer:
                 controlnet_cond,
                 denoise if init_image else 1.0,
                 skip_layer_config,
+                residual_config,
             )
             image = self.vae_decode(sampled_latent)
             save_path = os.path.join(out_dir, f"{i:06d}.png")
@@ -570,6 +611,9 @@ def main(
     verbose=False,
     model_folder=MODEL_FOLDER,
     text_encoder_device="cpu",
+    residual_origin_layer=None,
+    residual_target_layers=None,
+    residual_weights=None,
     **kwargs,
 ):
     assert not kwargs, f"Unknown arguments: {kwargs}"
@@ -596,6 +640,10 @@ def main(
         _steps = steps or controlnet_config.get("steps", steps)
         _cfg = cfg or controlnet_config.get("cfg", cfg)
         _sampler = sampler or controlnet_config.get("sampler", sampler)
+
+    residual_config = build_residual_config(
+        residual_origin_layer, residual_target_layers, residual_weights
+    )
 
     inferencer = SD3Inferencer()
 
@@ -647,6 +695,7 @@ def main(
         init_image,
         denoise,
         skip_layer_config,
+        residual_config,
     )
 
 
